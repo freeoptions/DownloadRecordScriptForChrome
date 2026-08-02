@@ -7,6 +7,7 @@
 // @match        https://www.xiaohongshu.com.cn/*
 // @grant        GM_setClipboard
 // @grant        GM_addStyle
+// @grant        GM_cookie
 // ==/UserScript==
 
 (function () {
@@ -24,7 +25,7 @@
     .dr-panel{position:fixed;right:18px;bottom:18px;width:360px;height:560px;min-width:320px;min-height:320px;max-width:92vw;max-height:85vh;z-index:999999;background:#fff;border:1px solid var(--dr-accent-line);border-radius:14px;box-shadow:0 12px 34px rgba(124,58,237,.18);font:14px/1.5 "Microsoft YaHei",sans-serif;color:#222;overflow:hidden;resize:both;display:flex;flex-direction:column}
     .dr-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:linear-gradient(135deg,var(--dr-accent),var(--dr-accent-dark));color:#fff}
     .dr-title{font-size:15px;font-weight:700}
-    .dr-body{flex:1 1 auto;min-height:0;padding:10px;overflow:auto}
+    .dr-body{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;padding:6px 10px 10px;overflow:auto}
     .dr-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
     .dr-btn{border:0;border-radius:10px;padding:8px 10px;background:var(--dr-accent);color:#fff;cursor:pointer;font-size:13px;white-space:nowrap}
     .dr-btn.secondary{background:var(--dr-accent-soft);color:#4c1d95}
@@ -49,12 +50,15 @@
     .dr-group-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;align-items:center;width:100%}
     .dr-group-more{font-size:12px;color:#999;margin-top:6px}
     .dr-summary-bar{font-size:12px;color:#666;margin-bottom:8px}
-    .dr-tabs{display:flex;gap:8px;margin-bottom:10px}
+    .dr-tabs{position:sticky;top:0;z-index:20;display:flex;gap:8px;margin:0 -10px 10px;padding:0 10px 10px;background:#fff;box-sizing:border-box;box-shadow:0 2px 8px rgba(124,58,237,.08)}
     .dr-tab{flex:1;border:1px solid var(--dr-accent-line);background:#fff;color:#4c1d95;border-radius:10px;padding:8px 0;cursor:pointer}
     .dr-tab.active{background:var(--dr-accent);border-color:var(--dr-accent);color:#fff}
     .dr-hide{display:none !important}
     .dr-view-records{display:flex;flex-direction:column;min-height:0;flex:1 1 auto}
     .dr-view-records #dr-record-list{flex:1 1 auto;min-height:0;max-height:none}
+    .dr-record-nav{position:absolute;right:12px;bottom:12px;z-index:30;display:flex;flex-direction:column;gap:10px}
+    .dr-record-scroll-btn{width:32px;height:32px;padding:0;border:1px solid var(--dr-accent-line);border-radius:10px;background:#fff;color:var(--dr-accent);font-size:18px;font-weight:700;line-height:1;box-shadow:0 4px 12px rgba(124,58,237,.16)}
+    .dr-record-scroll-btn:hover{background:var(--dr-accent-soft);border-color:var(--dr-accent);transform:translateY(-1px)}
     .dr-panel.dr-collapsed{width:180px;height:auto;min-height:0;resize:none}
     .dr-panel.dr-collapsed .dr-body{display:none}
     .dr-toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%);z-index:1000000;background:rgba(124,58,237,.88);color:#fff;padding:10px 14px;border-radius:999px;font-size:13px;pointer-events:none;opacity:0;transition:opacity .2s ease}
@@ -326,6 +330,26 @@
     return true;
   }
 
+  function readCurrentCookies() {
+    const pageCookie = document.cookie || '';
+    if (typeof GM_cookie === 'undefined' || typeof GM_cookie.list !== 'function') {
+      return Promise.resolve(pageCookie);
+    }
+    return new Promise((resolve) => {
+      GM_cookie.list({ url: location.href }, (cookies, error) => {
+        if (error || !Array.isArray(cookies) || !cookies.length) {
+          resolve(pageCookie);
+          return;
+        }
+        const cookieText = cookies
+          .filter((cookie) => cookie && cookie.name)
+          .map((cookie) => `${cookie.name}=${cookie.value ?? ''}`)
+          .join('; ');
+        resolve(cookieText || pageCookie);
+      });
+    });
+  }
+
   function exportJson() {
     const payload = {
       app: APP_NAME,
@@ -402,6 +426,10 @@
     return { total: items.length, added, creator };
   }
 
+  function countDownloadedLinks(text) {
+    return parseLinks(text).length;
+  }
+
   function buildCreatorGroups() {
     const keyword = creatorKeyword.trim().toLowerCase();
     const groupsMap = new Map();
@@ -450,6 +478,28 @@
     const creatorGroups = buildCreatorGroups();
     const creatorChanged = loadMoreCreatorGroups(creatorGroups);
     if (creatorChanged) render();
+  }
+
+  function scrollRecordList(position) {
+    const scrollToPosition = () => {
+      const recordList = panel?.querySelector('#dr-record-list');
+      if (!recordList) return;
+      recordList.scrollTo({
+        top: position === 'bottom' ? recordList.scrollHeight : 0,
+        behavior: 'smooth',
+      });
+    };
+
+    if (position === 'bottom') {
+      const creatorGroups = buildCreatorGroups();
+      if (visibleCreatorGroupCount < creatorGroups.length) {
+        visibleCreatorGroupCount = creatorGroups.length;
+        render();
+        requestAnimationFrame(scrollToPosition);
+        return;
+      }
+    }
+    scrollToPosition();
   }
 
   function getScrollableParent(target) {
@@ -612,12 +662,14 @@
           <div class="dr-row" style="margin-top:8px">
             <button class="dr-btn" data-action="save-downloaded">加入记录</button>
             <button class="dr-btn secondary" data-action="paste-downloaded">粘贴剪贴板</button>
+            <button class="dr-btn secondary" data-action="count-downloaded">计数</button>
           </div>
           <div class="dr-row">
             <input id="dr-import" type="file" accept=".json" class="dr-input" style="padding:6px">
           </div>
           <div class="dr-row">
             <button class="dr-btn secondary" data-action="export">导出 JSON</button>
+            <button class="dr-btn secondary" data-action="copy-cookie">快速获取cookie</button>
           </div>
         </div>
         <div class="dr-section dr-hide" data-view="compare">
@@ -633,6 +685,10 @@
           <h4>已记录笔记</h4>
           <div id="dr-record-summary" class="dr-summary-bar">共 0 个博主，已记录 0 条笔记</div>
           <input id="dr-creator-search" class="dr-input" placeholder="搜索博主名称">
+          <div class="dr-record-nav" aria-label="记录列表快速滚动">
+            <button class="dr-btn secondary dr-record-scroll-btn" data-action="scroll-record-top" title="回到顶部" aria-label="回到顶部">↑</button>
+            <button class="dr-btn secondary dr-record-scroll-btn" data-action="scroll-record-bottom" title="到达底部" aria-label="到达底部">↓</button>
+          </div>
           <div id="dr-record-list" class="dr-list"></div>
         </div>
       </div>
@@ -663,6 +719,21 @@
         exportJson();
         return;
       }
+      if (action === 'copy-cookie') {
+        try {
+          const cookieText = await readCurrentCookies();
+          if (!cookieText) {
+            showToast('当前页面没有可读取的 Cookie');
+            return;
+          }
+          await copyText(cookieText);
+          const cookieCount = cookieText.split(';').filter(Boolean).length;
+          showToast(`Cookie 已复制到剪贴板（${cookieCount} 项）`);
+        } catch {
+          showToast('Cookie 获取或复制失败');
+        }
+        return;
+      }
       if (action === 'compare') {
         render();
         const { unknown } = compareLinks(panel.querySelector('#dr-links').value);
@@ -677,6 +748,20 @@
         } catch {
           showToast('读取剪贴板失败，请手动粘贴');
         }
+        return;
+      }
+      if (action === 'count-downloaded') {
+        const text = panel.querySelector('#dr-downloaded-links').value;
+        const count = countDownloadedLinks(text);
+        showToast(`当前输入中识别到 ${count} 条链接`);
+        return;
+      }
+      if (action === 'scroll-record-top') {
+        scrollRecordList('top');
+        return;
+      }
+      if (action === 'scroll-record-bottom') {
+        scrollRecordList('bottom');
         return;
       }
       if (action === 'paste') {

@@ -1,6 +1,6 @@
 ﻿# DownloadRecord 项目专属规则
 
-通用规则见：`E:\@imFile-Download\AI-Useful-Prompt\通用开发工作规则.md`。
+本项目继承 Codex 已加载的全局 `AGENTS.md`（本机：`C:\Users\freez\.codex\AGENTS.md`）；以下保留项目专属规则。
 
 - 本项目是 Tampermonkey 用户脚本，主要入口是 `DownloadRecord.user.js`。
 - 功能围绕小红书下载记录、链接去重、JSON 导出和手动标记；修改时保持脚本可直接安装运行，不引入需要构建的框架。
